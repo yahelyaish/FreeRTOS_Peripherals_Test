@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 //#include "crc.h"
 #include <semphr.h>
 
@@ -69,27 +70,30 @@ int _write(int file, char *ptr, int len)
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-
-
+#define MAX_PAYLOAD 255
 
 uint8_t ch;
 uint8_t loopback_rx_buff[MAX_PAYLOAD];
 
-
 QueueHandle_t packetQueue;
-
-QueueHandle_t UARTQueue;
-QueueHandle_t I2CQueue;
-QueueHandle_t SPIQueue;
-
+QueueHandle_t routeMsgQueue;
+static QueueHandle_t periphQueueTable[PERIPH_COUNT];
 QueueHandle_t resultQueue;
 
 
 TaskHandle_t uartRxTask_Handle;
+TaskHandle_t dispatcherTask_Handle;
+TaskHandle_t routerTask_Handle;
+TaskHandle_t UARTPeriphCheckTASK_Handle;
+TaskHandle_t I2CPeriphCheckTASK_Handle;
+TaskHandle_t SPIPeriphCheckTASK_Handle;
+TaskHandle_t uartTx_Handle;
+
+
+
 void uartRxTask(void *argument){
     static uint8_t buff[MAX_PAYLOAD];
     static uint8_t idx;
-
     for(;;){
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		if(ch!='\r'&&ch!='\n'&&idx<MAX_PAYLOAD-1)
@@ -98,110 +102,98 @@ void uartRxTask(void *argument){
 			buff[idx++]=ch;
 		}else
 		{
-		    packet_t rxPacket;
-		    rxPacket.payloadSize=idx;
-			strcpy((char*)rxPacket.payLoad,(char*)buff);
-			rxPacket.payLoad[rxPacket.payloadSize]='\0';
-
+			packet_t* rxPacket = initPacket(buff, idx);
+		    idx = 0;
+			if(rxPacket){
 			if (xQueueSend(packetQueue, &rxPacket, portMAX_DELAY) != pdTRUE){
-			   printf("Send msg on QUEUE failed!\r\n");
+				vPortFree(rxPacket->payLoad);
+				vPortFree(rxPacket);
+				printf("Send msg on QUEUE failed!\r\n");
+			}
 			}
 		}
 		HAL_UART_Receive_IT(&huart3,&ch,1);
 	}
 }
 
-
-TaskHandle_t dispatcherTask_Handle;
 void dispatcherTask(void *arg){
-	packet_t pktCHECK;
+	packet_t *pktCHECK;
 	static uint32_t g_testIdCounter;
 	for(;;)
 	{
-		if(xQueueReceive(packetQueue, &pktCHECK, portMAX_DELAY)==pdTRUE){
-			pktCHECK.TEST_ID=(++g_testIdCounter);
-			pktCHECK.numOfIter=NUM_OF_ITER;
-			pktCHECK.PERIPHERAL=SPI;
-			switch (pktCHECK.PERIPHERAL)
+		if(xQueueReceive(packetQueue, &pktCHECK, portMAX_DELAY)==pdTRUE)
+		{
+			fillPacketMeta(pktCHECK,&g_testIdCounter);
+			if(xQueueSend(routeMsgQueue,&pktCHECK,portMAX_DELAY)!=pdTRUE)
 			{
-			case UART:
-			    if (xQueueSend(UARTQueue, &pktCHECK, portMAX_DELAY) != pdTRUE)
-			    {
-			       printf("Send msg on UARTQUEUE failed!\r\n");
-			    }
-			    break;
-
-			case I2C:
-			    if (xQueueSend(I2CQueue, &pktCHECK, portMAX_DELAY) != pdTRUE)
-			    {
-			        printf("Send msg on I2CQUEUE failed!\r\n");
-			    }
-			    break;
-
-			 case SPI:
-			     if (xQueueSend(SPIQueue, &pktCHECK, portMAX_DELAY) != pdTRUE)
-			     {
-			         printf("Send msg on SPIQUEUE failed!\r\n");
-			     }
-			     break;
-
-			default:
-			    printf("Unknown PERIPHERAL = 0x%02X\r\n", pktCHECK.PERIPHERAL);
-			    break;
-			}
+				vPortFree(pktCHECK->payLoad);
+				vPortFree(pktCHECK);
+				printf("sending to routeMsgQueue Failed\r\n");
 			}
 		}
 	}
+}
 
 
-TaskHandle_t UARTPeriphCheckTASK_Handle;
+void routerTask(void *arg){
+	packet_t * routerPKT;
+	for(;;){
+		if(xQueueReceive(routeMsgQueue, &routerPKT,portMAX_DELAY)==pdTRUE){
+			if(xQueueSend(periphQueueTable[routerPKT->PERIPHERAL],&routerPKT,portMAX_DELAY)!=pdTRUE){
+				printf("error sending to peripheral\r\n");
+			}
+		}
+	}
+}
+
 void UARTPeriphCheckTASK(void *arg){
-	packet_t UART_PKT;
+	packet_t* UART_PKT;
 	resProtocol result;
 	for(;;){
-		if(xQueueReceive(UARTQueue, &UART_PKT, portMAX_DELAY)==pdTRUE){
-			result.peripheral=UART_PKT.PERIPHERAL;
-			result.status = loopback.uart(UART_PKT.payLoad,loopback_rx_buff,UART_PKT.payloadSize,UART_PKT.numOfIter);
+		if(xQueueReceive(periphQueueTable[UART], &UART_PKT, portMAX_DELAY)==pdTRUE){
+			result.peripheral=UART_PKT->PERIPHERAL;
+			result.status = loopback.uart(UART_PKT->payLoad,loopback_rx_buff,UART_PKT->payloadSize,UART_PKT->numOfIter);
 			if(xQueueSend(resultQueue,&result,portMAX_DELAY)!=pdTRUE){
 				printf("sending FAILED\n");
 			}
-
 		}
+		vPortFree(UART_PKT->payLoad);
+		vPortFree(UART_PKT);
 	}
 }
 
-TaskHandle_t I2CPeriphCheckTASK_Handle;
 void I2CPeriphCheckTASK(void *arg){
-	packet_t I2C_PKT;
+	packet_t* I2C_PKT;
 	resProtocol result;
 	for(;;){
-		if(xQueueReceive(I2CQueue, &I2C_PKT, portMAX_DELAY)!=pdFALSE){
-			result.peripheral=I2C_PKT.PERIPHERAL;
-			result.status = loopback.i2c(I2C_PKT.payLoad,loopback_rx_buff,I2C_PKT.payloadSize,I2C_PKT.numOfIter);
+		if(xQueueReceive(periphQueueTable[I2C], &I2C_PKT, portMAX_DELAY)!=pdFALSE){
+			result.peripheral=I2C_PKT->PERIPHERAL;
+			result.status = loopback.i2c(I2C_PKT->payLoad,loopback_rx_buff,I2C_PKT->payloadSize,I2C_PKT->numOfIter);
 			if(xQueueSend(resultQueue,&result,portMAX_DELAY)!=pdTRUE){
 							printf("sending FAILED\n");
 			}
 		}
+		vPortFree(I2C_PKT->payLoad);
+		vPortFree(I2C_PKT);
 	}
 }
-
-TaskHandle_t SPIPeriphCheckTASK_Handle;
 void SPIPeriphCheckTASK(void *arg){
-	packet_t SPI_PKT;
+	packet_t* SPI_PKT;
 	resProtocol result;
 	for(;;){
-		if(xQueueReceive(SPIQueue, &SPI_PKT, portMAX_DELAY)!=pdFALSE){
-			result.peripheral=SPI_PKT.PERIPHERAL;
-			result.status = loopback.spi(SPI_PKT.payLoad,loopback_rx_buff,SPI_PKT.payloadSize,SPI_PKT.numOfIter);
+		if(xQueueReceive(periphQueueTable[SPI], &SPI_PKT, portMAX_DELAY)!=pdFALSE){
+			result.peripheral=SPI_PKT->PERIPHERAL;
+			result.status = loopback.spi(SPI_PKT->payLoad,loopback_rx_buff,SPI_PKT->payloadSize,SPI_PKT->numOfIter);
 			if(xQueueSend(resultQueue,&result,portMAX_DELAY)!=pdTRUE){
 							printf("sending FAILED\n");
 			}
 		}
+		vPortFree(SPI_PKT->payLoad);
+		vPortFree(SPI_PKT);
 	}
 }
 
 
-TaskHandle_t uartTx_Handle;
 void transmitTask(void *arg){
     resProtocol resTX;
 	for(;;){
@@ -256,14 +248,22 @@ HAL_UART_Receive_IT(&huart3, &ch, 1);
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
-	packetQueue= xQueueCreate(4,sizeof(packet_t));
+	packetQueue= xQueueCreate(4,sizeof(packet_t*));
 
-	UARTQueue= xQueueCreate(4,sizeof(packet_t));
-	I2CQueue= xQueueCreate(4,sizeof(packet_t));
-	SPIQueue= xQueueCreate(4,sizeof(packet_t));
+	//array of QueueTables
+	periphQueueTable[UART] = xQueueCreate(4, sizeof(packet_t*));
+	periphQueueTable[I2C]  = xQueueCreate(4, sizeof(packet_t*));
+	periphQueueTable[SPI]  = xQueueCreate(4, sizeof(packet_t*));
 
+	routeMsgQueue =xQueueCreate(4,sizeof(packet_t*));
 
 	resultQueue=xQueueCreate(4,sizeof(resProtocol));
+
+
+
+
+
+
 
 
   /* USER CODE END RTOS_QUEUES */
@@ -274,6 +274,8 @@ HAL_UART_Receive_IT(&huart3, &ch, 1);
   /* USER CODE BEGIN RTOS_THREADS */
 	xTaskCreate(transmitTask,"transmitTask", 256, NULL, 1, &uartTx_Handle);
 	xTaskCreate(dispatcherTask, "dispatcherTask", 256, NULL, 1, &dispatcherTask_Handle);
+
+	xTaskCreate(routerTask, "routerTask", 256, NULL, 1, &routerTask_Handle);
 
 	xTaskCreate(UARTPeriphCheckTASK, "UARTPeriphCheckTASK", 256, NULL, 1, &UARTPeriphCheckTASK_Handle);
 	xTaskCreate(I2CPeriphCheckTASK, "I2CPeriphCheckTASK", 256, NULL, 1, &I2CPeriphCheckTASK_Handle);
@@ -312,6 +314,8 @@ HAL_UART_Receive_IT(&huart3, &ch, 1);
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
+/*--------------CALLBACKS-----------*/
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -338,23 +342,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-//uint8_t uart_loopback_crc(uint8_t *tx, uint8_t *rx,
-//                             uint16_t len, uint8_t iters)
-//{
-//	uint8_t UARTsuccessCnt=0;
-//	for(size_t i=0;i<iters;i++)
-//	{
-//		HAL_UART_Receive_IT(&huart2, rx, len);
-//		HAL_UART_Transmit_IT(&huart2, tx, len);
-//
-//	    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-//
-//	    if(crc_check(tx,rx,len)==CRC_OK){
-//				++UARTsuccessCnt;
-//	}
-//}
-//	return UARTsuccessCnt;
-//}
 
 
 void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
@@ -373,36 +360,7 @@ void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
 
 }
 
-//uint8_t i2c_loopback_crc(uint8_t *tx, uint8_t *rx,
-//                             uint16_t len, uint8_t iters)
-//{
-//	uint8_t I2CsuccessCnt=0;
-//	for(size_t i=0;i<iters;i++)
-//	{
-//		HAL_I2C_Slave_Receive_IT(&hi2c2, rx, len);
-//		HAL_I2C_Master_Transmit_IT(&hi2c1, SLAVE_ADDR, tx, len);
-//
-//	    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-//
-//			if(crc_check(tx,rx,len)==CRC_OK){
-//				++I2CsuccessCnt;
-//	}
-//}
-//	return I2CsuccessCnt;
-//}
-//
 
-
-
-//
-//void print_hex(const char *label, uint8_t *buf, uint16_t len)
-//{
-//    printf("%s: ", label);
-//    for (uint16_t i = 0; i < len; i++) {
-//        printf("%02X ", buf[i]);
-//    }
-//    printf("\r\n");
-//}
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi){
 	BaseType_t xHigherPriorityTaskWoken;
@@ -418,54 +376,6 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi){
 		    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-
-//
-//uint8_t spi_loopback_crc(uint8_t *tx, uint8_t *rx,
-//                             uint16_t len, uint8_t iters)
-//{
-//
-//	uint8_t dummy_tx[len],dummy_rx[len];
-//	memset(dummy_tx, 0xEE, len);
-//	memset(dummy_rx, 0xFF, len);
-//	uint8_t SPIsuccessCnt=0;
-//
-////	print_hex("BEFORE rx", rx, len);
-////			print_hex("BEFORE tx", tx, len);
-////			print_hex("BEFORE dummy_rx", dummy_rx, len);
-////			print_hex("BEFORE dummy_tx", dummy_tx, len);
-//	for(size_t i=0;i<iters;i++)
-//	{
-//		HAL_SPI_TransmitReceive_IT(&hspi4, dummy_tx,rx, len);
-//		HAL_SPI_TransmitReceive_IT(&hspi1, tx, dummy_rx,len);
-//
-//	    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-//
-//			if(crc_check(tx,rx,len)==CRC_OK){
-//				++SPIsuccessCnt;
-//	}
-//}
-////	print_hex("AFTER rx", rx, len);
-////	print_hex("AFTER tx", tx, len);
-////	print_hex("AFTER dummy_rx", dummy_rx, len);
-////	print_hex("AFTER dummy_tx", dummy_tx, len);
-//	return SPIsuccessCnt;
-//}
-
-
-//
-//crc_status_t crc_check(uint8_t *tx,uint8_t *rx,uint8_t len){
-//
-//	uint32_t crc_tx;
-//	uint32_t crc_rx;
-//
-//	crc_tx=HAL_CRC_Calculate(&hcrc, tx,len);
-//	crc_rx=HAL_CRC_Calculate(&hcrc, rx, len);
-//	if(crc_tx==crc_rx){
-//		return CRC_OK;
-//	}
-//	return CRC_FAIL;
-//}
-//
 
 
 /* USER CODE END PTD */

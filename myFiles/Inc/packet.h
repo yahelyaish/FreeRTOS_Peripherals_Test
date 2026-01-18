@@ -11,12 +11,15 @@
 #include <stdint.h>
 
 #define NUM_OF_ITER 100
-#define MAX_PAYLOAD 255
+//#define MAX_PAYLOAD 255
 
 
-#define UART 0x0
-#define I2C 0x1
-#define SPI 0x2
+typedef enum peripheral_t{
+    UART=0,
+    I2C,
+    SPI,
+    PERIPH_COUNT
+} peripheral_t;
 
 
 extern const char* periphStr[];
@@ -27,7 +30,7 @@ typedef struct packet_t{
 	uint8_t PERIPHERAL;
 	uint8_t numOfIter;
 	uint8_t payloadSize;
-	uint8_t payLoad[MAX_PAYLOAD];
+	uint8_t* payLoad;
 }packet_t;
 
 typedef struct resProtocol{
@@ -35,7 +38,8 @@ typedef struct resProtocol{
 	uint8_t status;
 }resProtocol;
 
-
-
+packet_t* initPacket(const uint8_t *buff,uint8_t idx);
+void fillPacketMeta(packet_t* pkt,uint32_t* testID);
+void printPacket(packet_t* pkt);
 
 #endif /* INC_PACKET_H_ */
