@@ -136,3 +136,8 @@ Planned future work includes:
 - Adding I2C RX loopback support
 - Extending the packet protocol with acknowledgments, timeouts, and diagnostics
 - Introducing configuration and health-monitoring packets
+
+Photo of 3 terminals:
+1-on the left - PCHOST sending PACKETS
+2-on the middle GETAWAY beaglebone, sending acknowledge of receiving the packet then send the result/
+3-on the right - the STM.

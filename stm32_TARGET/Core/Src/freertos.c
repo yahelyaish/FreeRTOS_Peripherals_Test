@@ -37,6 +37,7 @@
 
 #include "loopbackCRC.h"
 #include "packet.h"
+#include "crc.h"
 
 
 int _write(int file, char *ptr, int len)
@@ -376,11 +377,11 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi){
        }
 }
 
-void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi){
-       if (hspi == &hspi1) {
-    	   rxSPI1=1;
-       }
-}
+//void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi){
+//       if (hspi == &hspi1) {
+//    	   rxSPI1=1;
+//       }
+//}
 
 
 /* USER CODE END PTD */

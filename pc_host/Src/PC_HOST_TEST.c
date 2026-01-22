@@ -10,12 +10,10 @@
 #define CLIENT_IP "192.168.7.2"   // GBB
 #define PORT 5000 // now socket address = 192.168.7.2:5000
 
-
 #define PERIPH_UART 0x00
 #define PERIPH_I2C  0x01
 #define PERIPH_SPI  0x02
 #define PERIPH_MAX  3
-const char* peripStr[PERIPH_MAX]={"UART","I2C","SPI"};
 uint8_t testCnt;
 
 int main(void)
@@ -45,7 +43,7 @@ int main(void)
 
     //build+send packet
     packet_t rx_pkt;
-
+    for(int i=0;i<30;i++){
     for (int periph = PERIPH_UART; periph < PERIPH_MAX ; periph++)
     {
         printf("\n--------------------\n");
@@ -83,7 +81,11 @@ int main(void)
                 printf("\n--------------------\n");
     }
     }
+}
 
     close(sock);
     return 0;
 }
+
+
+ 

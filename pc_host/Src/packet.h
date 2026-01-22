@@ -5,7 +5,14 @@
 #include "stdio.h"
 #include <netinet/in.h> 
 
+#define PERIPH_UART 0x00
+#define PERIPH_I2C  0x01
+#define PERIPH_SPI  0x02
+#define PERIPH_MAX  3
 #define PAYLOAD_MAX 256
+
+extern const char* peripStr[PERIPH_MAX];
+
 
 typedef struct __attribute__((packed)){
     uint32_t test_id;        // מזהה בדיקה

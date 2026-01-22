@@ -4,6 +4,8 @@
 #include <arpa/inet.h>
 #include "stdio.h"
 
+const char* peripStr[PERIPH_MAX]={"UART","I2C","SPI"};
+
 void build_packet(packet_t *pkt, uint8_t peripheral, uint32_t test_id)
 {
     pkt->test_id     = test_id;
@@ -37,7 +39,7 @@ void printPacket(const packet_t *pkt)
 {
     printf("Packet:\n");
     printf("  test_id     = %u\n", pkt->test_id);
-    printf("  peripheral  = %u\n", pkt->peripheral);
+    printf("  peripheral  = %s\n", peripStr[pkt->peripheral]);
     printf("  iterations  = %u\n", pkt->iterations);
     printf("  payload_len = %u\n", pkt->payload_len);
 
