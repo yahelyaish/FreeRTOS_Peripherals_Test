@@ -90,11 +90,11 @@ The goal of the project is to demonstrate:
 
 ## Current Status
 
-| Peripheral        | Status                             |
+| Peripheral        | Status                              |
 |-------------------|-------------------------------------|
 | UART              | ✅ Implemented and tested           |
 | I2C               | ⚠️ TX implemented (RX pending)      |
-| SPI               | ⚠️ Framework implemented (debug)    |
+| SPI               | ✅ implemented                      |
 | UDP Transport     | ✅ Implemented                      |
 | Packet Protocol   | ✅ Implemented                      |
 | CRC Validation    | ✅ Implemented                      |
